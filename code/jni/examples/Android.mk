@@ -15,27 +15,6 @@ LOCAL_MODULE := example_util
 
 include $(BUILD_STATIC_LIBRARY)
 
-
-################################################################################
-# libexample_dec
-
-include $(CLEAR_VARS)
-
-LOCAL_SRC_FILES := \
-    image_dec.c \
-    jpegdec.c \
-    metadata.c \
-    pngdec.c \
-    tiffdec.c \
-    webpdec.c \
-
-LOCAL_CFLAGS := $(WEBP_CFLAGS)
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/../src
-
-LOCAL_MODULE := example_dec
-
-include $(BUILD_STATIC_LIBRARY)
-
 ################################################################################
 # cwebp
 
@@ -48,7 +27,7 @@ LOCAL_SRC_FILES := \
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../src
-LOCAL_STATIC_LIBRARIES := example_util example_dec webp
+LOCAL_STATIC_LIBRARIES := example_util imageio_util imagedec webpdemux webp
 
 LOCAL_MODULE := cwebp
 
@@ -64,8 +43,7 @@ LOCAL_SRC_FILES := \
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../src
-LOCAL_STATIC_LIBRARIES := example_util webp
-
+LOCAL_STATIC_LIBRARIES := example_util imagedec imageenc webpdemux webp
 LOCAL_MODULE := dwebp
 
 include $(BUILD_EXECUTABLE)
@@ -80,8 +58,41 @@ LOCAL_SRC_FILES := \
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../src
-LOCAL_STATIC_LIBRARIES := example_util webpmux webp
+LOCAL_STATIC_LIBRARIES := example_util imageio_util webpmux webp
 
 LOCAL_MODULE := webpmux_example
+
+include $(BUILD_EXECUTABLE)
+
+################################################################################
+# img2webp
+
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES := \
+    img2webp.c \
+
+LOCAL_CFLAGS := $(WEBP_CFLAGS)
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/../src
+LOCAL_STATIC_LIBRARIES := example_util imageio_util imagedec webpmux webpdemux \
+                          webp
+
+LOCAL_MODULE := img2webp_example
+
+include $(BUILD_EXECUTABLE)
+
+################################################################################
+# webpinfo
+
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES := \
+    webpinfo.c \
+
+LOCAL_CFLAGS := $(WEBP_CFLAGS)
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/../src
+LOCAL_STATIC_LIBRARIES := example_util imageio_util webp
+
+LOCAL_MODULE := webpinfo_example
 
 include $(BUILD_EXECUTABLE)

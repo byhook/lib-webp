@@ -12,16 +12,13 @@
 
 #include "./example_util.h"
 
-#if defined(_WIN32)
-#include <fcntl.h>   // for _O_BINARY
-#include <io.h>      // for _setmode()
-#endif
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "webp/decode.h"
-#include "./stopwatch.h"
+#include "webp/mux_types.h"
+#include "../imageio/imageio_util.h"
 
 //------------------------------------------------------------------------------
 // String parsing
@@ -41,6 +38,18 @@ int ExUtilGetInt(const char* const v, int base, int* const error) {
   return (int)ExUtilGetUInt(v, base, error);
 }
 
+int ExUtilGetInts(const char* v, int base, int max_output, int output[]) {
+  int n, error = 0;
+  for (n = 0; v != NULL && n < max_output; ++n) {
+    const int value = ExUtilGetInt(v, base, &error);
+    if (error) return -1;
+    output[n] = value;
+    v = strchr(v, ',');
+    if (v != NULL) ++v;   // skip over the trailing ','
+  }
+  return n;
+}
+
 float ExUtilGetFloat(const char* const v, int* const error) {
   char* end = NULL;
   const float f = (v != NULL) ? (float)strtod(v, &end) : 0.f;
@@ -52,230 +61,67 @@ float ExUtilGetFloat(const char* const v, int* const error) {
   return f;
 }
 
-// -----------------------------------------------------------------------------
-// File I/O
-
-FILE* ExUtilSetBinaryMode(FILE* file) {
-#if defined(_WIN32)
-  if (_setmode(_fileno(file), _O_BINARY) == -1) {
-    fprintf(stderr, "Failed to reopen file in O_BINARY mode.\n");
-    return NULL;
-  }
-#endif
-  return file;
-}
-
-int ExUtilReadFromStdin(const uint8_t** data, size_t* data_size) {
-  static const size_t kBlockSize = 16384;  // default initial size
-  size_t max_size = 0;
-  size_t size = 0;
-  uint8_t* input = NULL;
-
-  if (data == NULL || data_size == NULL) return 0;
-  *data = NULL;
-  *data_size = 0;
-
-  if (!ExUtilSetBinaryMode(stdin)) return 0;
-
-  while (!feof(stdin)) {
-    // We double the buffer size each time and read as much as possible.
-    const size_t extra_size = (max_size == 0) ? kBlockSize : max_size;
-    void* const new_data = realloc(input, max_size + extra_size);
-    if (new_data == NULL) goto Error;
-    input = (uint8_t*)new_data;
-    max_size += extra_size;
-    size += fread(input + size, 1, extra_size, stdin);
-    if (size < max_size) break;
-  }
-  if (ferror(stdin)) goto Error;
-  *data = input;
-  *data_size = size;
-  return 1;
-
- Error:
-  free(input);
-  fprintf(stderr, "Could not read from stdin\n");
-  return 0;
-}
-
-int ExUtilReadFile(const char* const file_name,
-                   const uint8_t** data, size_t* data_size) {
-  int ok;
-  void* file_data;
-  size_t file_size;
-  FILE* in;
-  const int from_stdin = (file_name == NULL) || !strcmp(file_name, "-");
-
-  if (from_stdin) return ExUtilReadFromStdin(data, data_size);
-
-  if (data == NULL || data_size == NULL) return 0;
-  *data = NULL;
-  *data_size = 0;
-
-  in = fopen(file_name, "rb");
-  if (in == NULL) {
-    fprintf(stderr, "cannot open input file '%s'\n", file_name);
-    return 0;
-  }
-  fseek(in, 0, SEEK_END);
-  file_size = ftell(in);
-  fseek(in, 0, SEEK_SET);
-  file_data = malloc(file_size);
-  if (file_data == NULL) return 0;
-  ok = (fread(file_data, file_size, 1, in) == 1);
-  fclose(in);
-
-  if (!ok) {
-    fprintf(stderr, "Could not read %d bytes of data from file %s\n",
-            (int)file_size, file_name);
-    free(file_data);
-    return 0;
-  }
-  *data = (uint8_t*)file_data;
-  *data_size = file_size;
-  return 1;
-}
-
-int ExUtilWriteFile(const char* const file_name,
-                    const uint8_t* data, size_t data_size) {
-  int ok;
-  FILE* out;
-  const int to_stdout = (file_name == NULL) || !strcmp(file_name, "-");
-
-  if (data == NULL) {
-    return 0;
-  }
-  out = to_stdout ? stdout : fopen(file_name, "wb");
-  if (out == NULL) {
-    fprintf(stderr, "Error! Cannot open output file '%s'\n", file_name);
-    return 0;
-  }
-  ok = (fwrite(data, data_size, 1, out) == 1);
-  if (out != stdout) fclose(out);
-  return ok;
-}
-
-//------------------------------------------------------------------------------
-// WebP decoding
-
-static const char* const kStatusMessages[VP8_STATUS_NOT_ENOUGH_DATA + 1] = {
-  "OK", "OUT_OF_MEMORY", "INVALID_PARAM", "BITSTREAM_ERROR",
-  "UNSUPPORTED_FEATURE", "SUSPENDED", "USER_ABORT", "NOT_ENOUGH_DATA"
-};
-
-static void PrintAnimationWarning(const WebPDecoderConfig* const config) {
-  if (config->input.has_animation) {
-    fprintf(stderr,
-            "Error! Decoding of an animated WebP file is not supported.\n"
-            "       Use webpmux to extract the individual frames or\n"
-            "       vwebp to view this image.\n");
-  }
-}
-
-void ExUtilPrintWebPError(const char* const in_file, int status) {
-  fprintf(stderr, "Decoding of %s failed.\n", in_file);
-  fprintf(stderr, "Status: %d", status);
-  if (status >= VP8_STATUS_OK && status <= VP8_STATUS_NOT_ENOUGH_DATA) {
-    fprintf(stderr, "(%s)", kStatusMessages[status]);
-  }
-  fprintf(stderr, "\n");
-}
-
-int ExUtilLoadWebP(const char* const in_file,
-                   const uint8_t** data, size_t* data_size,
-                   WebPBitstreamFeatures* bitstream) {
-  VP8StatusCode status;
-  WebPBitstreamFeatures local_features;
-  if (!ExUtilReadFile(in_file, data, data_size)) return 0;
-
-  if (bitstream == NULL) {
-    bitstream = &local_features;
-  }
-
-  status = WebPGetFeatures(*data, *data_size, bitstream);
-  if (status != VP8_STATUS_OK) {
-    free((void*)*data);
-    *data = NULL;
-    *data_size = 0;
-    ExUtilPrintWebPError(in_file, status);
-    return 0;
-  }
-  return 1;
-}
-
 //------------------------------------------------------------------------------
 
-VP8StatusCode ExUtilDecodeWebP(const uint8_t* const data, size_t data_size,
-                               int verbose, WebPDecoderConfig* const config) {
-  Stopwatch stop_watch;
-  VP8StatusCode status = VP8_STATUS_OK;
-  if (config == NULL) return VP8_STATUS_INVALID_PARAM;
-
-  PrintAnimationWarning(config);
-
-  StopwatchReset(&stop_watch);
-
-  // Decoding call.
-  status = WebPDecode(data, data_size, config);
-
-  if (verbose) {
-    const double decode_time = StopwatchReadAndReset(&stop_watch);
-    fprintf(stderr, "Time to decode picture: %.3fs\n", decode_time);
-  }
-  return status;
+static void ResetCommandLineArguments(int argc, const char* argv[],
+                                      CommandLineArguments* const args) {
+  assert(args != NULL);
+  args->argc_ = argc;
+  args->argv_ = argv;
+  args->own_argv_ = 0;
+  WebPDataInit(&args->argv_data_);
 }
 
-VP8StatusCode ExUtilDecodeWebPIncremental(
-    const uint8_t* const data, size_t data_size,
-    int verbose, WebPDecoderConfig* const config) {
-  Stopwatch stop_watch;
-  VP8StatusCode status = VP8_STATUS_OK;
-  if (config == NULL) return VP8_STATUS_INVALID_PARAM;
-
-  PrintAnimationWarning(config);
-
-  StopwatchReset(&stop_watch);
-
-  // Decoding call.
-  {
-    WebPIDecoder* const idec = WebPIDecode(data, data_size, config);
-    if (idec == NULL) {
-      fprintf(stderr, "Failed during WebPINewDecoder().\n");
-      return VP8_STATUS_OUT_OF_MEMORY;
-    } else {
-#ifdef WEBP_EXPERIMENTAL_FEATURES
-      size_t size = 0;
-      const size_t incr = 2 + (data_size / 20);
-      while (size < data_size) {
-        size_t next_size = size + (rand() % incr);
-        if (next_size > data_size) next_size = data_size;
-        status = WebPIUpdate(idec, data, next_size);
-        if (status != VP8_STATUS_OK && status != VP8_STATUS_SUSPENDED) break;
-        size = next_size;
-      }
-#else
-      status = WebPIUpdate(idec, data, data_size);
-#endif
-      WebPIDelete(idec);
+void ExUtilDeleteCommandLineArguments(CommandLineArguments* const args) {
+  if (args != NULL) {
+    if (args->own_argv_) {
+      free((void*)args->argv_);
+      WebPDataClear(&args->argv_data_);
     }
-  }
-
-  if (verbose) {
-    const double decode_time = StopwatchReadAndReset(&stop_watch);
-    fprintf(stderr, "Time to decode picture: %.3fs\n", decode_time);
-  }
-  return status;
-}
-
-// -----------------------------------------------------------------------------
-
-void ExUtilCopyPlane(const uint8_t* src, int src_stride,
-                     uint8_t* dst, int dst_stride, int width, int height) {
-  while (height-- > 0) {
-    memcpy(dst, src, width * sizeof(*dst));
-    src += src_stride;
-    dst += dst_stride;
+    ResetCommandLineArguments(0, NULL, args);
   }
 }
 
-// -----------------------------------------------------------------------------
+#define MAX_ARGC 16384
+int ExUtilInitCommandLineArguments(int argc, const char* argv[],
+                                   CommandLineArguments* const args) {
+  if (args == NULL || argv == NULL) return 0;
+  ResetCommandLineArguments(argc, argv, args);
+  if (argc == 1 && argv[0][0] != '-') {
+    char* cur;
+    const char sep[] = " \t\r\n\f\v";
+    if (!ExUtilReadFileToWebPData(argv[0], &args->argv_data_)) {
+      return 0;
+    }
+    args->own_argv_ = 1;
+    args->argv_ = (const char**)malloc(MAX_ARGC * sizeof(*args->argv_));
+    if (args->argv_ == NULL) return 0;
+
+    argc = 0;
+    for (cur = strtok((char*)args->argv_data_.bytes, sep);
+         cur != NULL;
+         cur = strtok(NULL, sep)) {
+      if (argc == MAX_ARGC) {
+        fprintf(stderr, "ERROR: Arguments limit %d reached\n", MAX_ARGC);
+        return 0;
+      }
+      assert(strlen(cur) != 0);
+      args->argv_[argc++] = cur;
+    }
+    args->argc_ = argc;
+  }
+  return 1;
+}
+
+//------------------------------------------------------------------------------
+
+int ExUtilReadFileToWebPData(const char* const filename,
+                             WebPData* const webp_data) {
+  const uint8_t* data;
+  size_t size;
+  if (webp_data == NULL) return 0;
+  if (!ImgIoUtilReadFile(filename, &data, &size)) return 0;
+  webp_data->bytes = data;
+  webp_data->size = size;
+  return 1;
+}

@@ -1,0 +1,57 @@
+libimagedec_la-image_dec.lo: image_dec.c /usr/include/stdc-predef.h \
+ image_dec.h ../src/webp/types.h \
+ /usr/lib/gcc/x86_64-linux-gnu/5/include/stddef.h /usr/include/inttypes.h \
+ /usr/include/features.h /usr/include/x86_64-linux-gnu/sys/cdefs.h \
+ /usr/include/x86_64-linux-gnu/bits/wordsize.h \
+ /usr/include/x86_64-linux-gnu/gnu/stubs.h \
+ /usr/include/x86_64-linux-gnu/gnu/stubs-64.h \
+ /usr/lib/gcc/x86_64-linux-gnu/5/include/stdint.h /usr/include/stdint.h \
+ /usr/include/x86_64-linux-gnu/bits/wchar.h ../src/webp/config.h \
+ metadata.h jpegdec.h pngdec.h pnmdec.h tiffdec.h webpdec.h \
+ ../src/webp/decode.h ../src/webp/./types.h wicdec.h
+
+/usr/include/stdc-predef.h:
+
+image_dec.h:
+
+../src/webp/types.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/5/include/stddef.h:
+
+/usr/include/inttypes.h:
+
+/usr/include/features.h:
+
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:
+
+/usr/include/x86_64-linux-gnu/bits/wordsize.h:
+
+/usr/include/x86_64-linux-gnu/gnu/stubs.h:
+
+/usr/include/x86_64-linux-gnu/gnu/stubs-64.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/5/include/stdint.h:
+
+/usr/include/stdint.h:
+
+/usr/include/x86_64-linux-gnu/bits/wchar.h:
+
+../src/webp/config.h:
+
+metadata.h:
+
+jpegdec.h:
+
+pngdec.h:
+
+pnmdec.h:
+
+tiffdec.h:
+
+webpdec.h:
+
+../src/webp/decode.h:
+
+../src/webp/./types.h:
+
+wicdec.h:

@@ -3,10 +3,19 @@ cmake_minimum_required(VERSION 2.8.7)
 project(libwebp C)
 
 # Options for coder / decoder executables.
+option(WEBP_ENABLE_SIMD "Enable any SIMD optimization." ON)
 option(WEBP_BUILD_CWEBP "Build the cwebp command line tool." OFF)
 option(WEBP_BUILD_DWEBP "Build the dwebp command line tool." OFF)
-option(WEBP_EXPERIMENTAL_FEATURES "Build with experimental features." OFF)
-option(WEBP_FORCE_ALIGNED "Force aligned memory operations." OFF)
+option(WEBP_BUILD_GIF2WEBP "Build the gif2webp conversion tool." OFF)
+option(WEBP_BUILD_IMG2WEBP "Build the img2webp animation tool." OFF)
+option(WEBP_BUILD_WEBPINFO "Build the webpinfo command line tool." OFF)
+option(WEBP_BUILD_WEBP_JS "Emscripten build of webp.js." OFF)
+option(WEBP_NEAR_LOSSLESS "Enable near-lossless encoding" ON)
+option(WEBP_ENABLE_SWAP_16BIT_CSP "Enable byte swap for 16 bit colorspaces." OFF)
+
+if(WEBP_BUILD_WEBP_JS)
+  set(WEBP_ENABLE_SIMD OFF)
+endif()
 
 set(WEBP_DEP_LIBRARIES)
 set(WEBP_DEP_INCLUDE_DIRS)
@@ -17,251 +26,139 @@ if(NOT CMAKE_BUILD_TYPE)
   )
 endif()
 
+# Include dependencies.
+include(cmake/deps.cmake)
+
 ################################################################################
-# Generate the config.h to compile with specific intrinsics / libs.
-
-## Check for compiler options.
-include(CheckCSourceCompiles)
-check_c_source_compiles("
-    int main(void) {
-      (void)__builtin_bswap16(0);
-      return 0;
-    }
-  "
-  HAVE_BUILTIN_BSWAP16
-)
-check_c_source_compiles("
-    int main(void) {
-      (void)__builtin_bswap32(0);
-      return 0;
-    }
-  "
-  HAVE_BUILTIN_BSWAP32
-)
-check_c_source_compiles("
-    int main(void) {
-      (void)__builtin_bswap64(0);
-      return 0;
-    }
-  "
-  HAVE_BUILTIN_BSWAP64
-)
-
-## Check for libraries.
-find_package(Threads)
-if(Threads_FOUND)
-  if(CMAKE_USE_PTHREADS_INIT)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
-  endif()
-  foreach(PTHREAD_TEST HAVE_PTHREAD_PRIO_INHERIT PTHREAD_CREATE_UNDETACHED)
-    check_c_source_compiles("
-        #include <pthread.h>
-        int main (void) {
-          int attr = ${PTHREAD_TEST};
-          return attr;
-        }
-      " ${PTHREAD_TEST}
-    )
-  endforeach()
-  list(APPEND WEBP_DEP_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
-endif()
-set(WEBP_USE_THREAD ${Threads_FOUND})
-
-# TODO: this seems unused, check with autotools.
-set(LT_OBJDIR ".libs/")
-
-# Only useful for vwebp, so useless for now.
-# find_package(OpenGL)
-# set(WEBP_HAVE_GL ${OPENGL_FOUND})
-# set(WEBP_DEP_INCLUDE_DIRS ${WEBP_DEP_INCLUDE_DIRS} ${OPENGL_INCLUDE_DIRS})
-# set(WEBP_DEP_LIBRARIES ${WEBP_DEP_LIBRARIES} ${OPENGL_LIBRARIES})
-
-# Find the standard C math library.
-find_library(MATH_LIBRARY NAMES m)
-if(MATH_LIBRARY)
-  list(APPEND WEBP_DEP_LIBRARIES ${MATH_LIBRARY})
+# Options.
+if(WEBP_ENABLE_SWAP_16BIT_CSP)
+  add_definitions(-DWEBP_SWAP_16BIT_CSP=1)
 endif()
 
-# Find the standard image libraries.
-set(WEBP_DEP_IMG_LIBRARIES)
-set(WEBP_DEP_IMG_INCLUDE_DIRS)
-foreach(I_LIB PNG JPEG TIFF GIF)
-  find_package(${I_LIB})
-  set(WEBP_HAVE_${I_LIB} ${${I_LIB}_FOUND})
-  if(${I_LIB}_FOUND)
-    list(APPEND WEBP_DEP_IMG_LIBRARIES ${${I_LIB}_LIBRARIES})
-    list(APPEND WEBP_DEP_IMG_INCLUDE_DIRS ${${I_LIB}_INCLUDE_DIRS})
-  endif()
-endforeach()
-
-## Check for specific headers.
-include(CheckIncludeFiles)
-check_include_files("stdlib.h;stdarg.h;string.h;float.h" STDC_HEADERS)
-check_include_files(dlfcn.h HAVE_DLFCN_H)
-check_include_files(GLUT/glut.h HAVE_GLUT_GLUT_H)
-check_include_files(GL/glut.h HAVE_GL_GLUT_H)
-check_include_files(inttypes.h HAVE_INTTYPES_H)
-check_include_files(memory.h HAVE_MEMORY_H)
-check_include_files(OpenGL/glut.h HAVE_OPENGL_GLUT_H)
-check_include_files(shlwapi.h HAVE_SHLWAPI_H)
-check_include_files(stdint.h HAVE_STDINT_H)
-check_include_files(stdlib.h HAVE_STDLIB_H)
-check_include_files(strings.h HAVE_STRINGS_H)
-check_include_files(string.h HAVE_STRING_H)
-check_include_files(sys/stat.h HAVE_SYS_STAT_H)
-check_include_files(sys/types.h HAVE_SYS_TYPES_H)
-check_include_files(unistd.h HAVE_UNISTD_H)
-check_include_files(wincodec.h HAVE_WINCODEC_H)
-check_include_files(windows.h HAVE_WINDOWS_H)
-
-# Windows specifics
-if(HAVE_WINCODEC_H)
-  list(APPEND WEBP_DEP_LIBRARIES shlwapi ole32 windowscodecs)
-endif()
-
-## Check for SIMD extensions.
-set(WEBP_SIMD_FLAGS "SSE2;SSE41;AVX2")
-set(WEBP_SIMD_FILE_EXTENSIONS "_sse2.c;_sse41.c;_avx2.c")
-if(MSVC)
-  # MSVC does not have a SSE4 flag but AVX2 support implies
-  # SSE4 support.
-  set(SIMD_ENABLE_FLAGS "/arch:SSE2;/arch:AVX2;/arch:AVX2")
-  set(SIMD_DISABLE_FLAGS)
+################################################################################
+# Android only.
+if(ANDROID)
+  include_directories(${ANDROID_NDK}/sources/android/cpufeatures)
+  add_library(cpufeatures STATIC
+    ${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c
+  )
+  target_link_libraries(cpufeatures dl)
+  set(WEBP_DEP_LIBRARIES ${WEBP_DEP_LIBRARIES} cpufeatures)
+  set(WEBP_DEP_INCLUDE_DIRS ${WEBP_DEP_INCLUDE_DIRS}
+    ${ANDROID_NDK}/sources/android/cpufeatures
+  )
+  add_definitions(-DHAVE_CPU_FEATURES_H=1)
+  set(HAVE_CPU_FEATURES_H 1)
 else()
-  set(SIMD_ENABLE_FLAGS "-msse2;-msse4.1;-mavx2")
-  set(SIMD_DISABLE_FLAGS "-mno-sse2;-mno-sse4.1;-mno-avx2")
+  set(HAVE_CPU_FEATURES_H 0)
 endif()
-
-set(WEBP_SIMD_FILES_TO_NOT_INCLUDE)
-set(WEBP_SIMD_FILES_TO_INCLUDE)
-set(WEBP_SIMD_FLAGS_TO_INCLUDE)
-
-list(LENGTH WEBP_SIMD_FLAGS WEBP_SIMD_FLAGS_LENGTH)
-math(EXPR WEBP_SIMD_FLAGS_RANGE "${WEBP_SIMD_FLAGS_LENGTH} - 1")
-
-foreach(I_SIMD RANGE ${WEBP_SIMD_FLAGS_RANGE})
-  list(GET WEBP_SIMD_FLAGS ${I_SIMD} WEBP_SIMD_FLAG)
-  list(GET SIMD_ENABLE_FLAGS ${I_SIMD} SIMD_COMPILE_FLAG)
-  set(CMAKE_REQUIRED_FLAGS ${SIMD_COMPILE_FLAG})
-  check_c_source_compiles("
-      #include \"${CMAKE_CURRENT_LIST_DIR}/src/dsp/dsp.h\"
-      int main(void) {
-        #if !defined(WEBP_USE_${WEBP_SIMD_FLAG})
-        this is not valid code
-        #endif
-        return 0;
-      }
-    "
-    WEBP_HAVE_${WEBP_SIMD_FLAG}
-  )
-
-  # Check which files we should include or not.
-  list(GET WEBP_SIMD_FILE_EXTENSIONS ${I_SIMD} WEBP_SIMD_FILE_EXTENSION)
-  file(GLOB SIMD_FILES RELATIVE ${CMAKE_CURRENT_LIST_DIR}
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/*${WEBP_SIMD_FILE_EXTENSION}"
-  )
-  if(WEBP_HAVE_${WEBP_SIMD_FLAG})
-    # Memorize the file and flags.
-    foreach(FILE ${SIMD_FILES})
-      list(APPEND WEBP_SIMD_FILES_TO_INCLUDE ${FILE})
-      list(APPEND WEBP_SIMD_FLAGS_TO_INCLUDE ${SIMD_COMPILE_FLAG})
-    endforeach()
-  else()
-    # Remove the file from the list.
-    foreach(FILE ${SIMD_FILES})
-      list(APPEND WEBP_SIMD_FILES_NOT_TO_INCLUDE ${FILE})
-    endforeach()
-    # Explicitly disable SIMD.
-    if(SIMD_DISABLE_FLAGS)
-      list(GET SIMD_DISABLE_FLAGS ${I_SIMD} SIMD_COMPILE_FLAG)
-      include(CheckCCompilerFlag)
-      check_c_compiler_flag(${SIMD_COMPILE_FLAG} HAS_COMPILE_FLAG)
-      if(HAS_COMPILE_FLAG)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${SIMD_COMPILE_FLAG}")
-      endif()
-    endif()
-  endif()
-endforeach()
-
-## Define extra info.
-set(PACKAGE ${PROJECT_NAME})
-set(PACKAGE_NAME ${PROJECT_NAME})
-
-# Read from configure.ac.
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/configure.ac CONFIGURE_AC)
-string(REGEX MATCHALL "\\[([0-9a-z\\.:/]*)\\]"
-  CONFIGURE_AC_PACKAGE_INFO ${CONFIGURE_AC}
-)
-function(strip_bracket VAR)
-  string(LENGTH ${${VAR}} TMP_LEN)
-  math(EXPR TMP_LEN ${TMP_LEN}-2)
-  string(SUBSTRING ${${VAR}} 1 ${TMP_LEN} TMP_SUB)
-  set(${VAR} ${TMP_SUB} PARENT_SCOPE)
-endfunction()
-
-list(GET CONFIGURE_AC_PACKAGE_INFO 1 PACKAGE_VERSION)
-strip_bracket(PACKAGE_VERSION)
-list(GET CONFIGURE_AC_PACKAGE_INFO 2 PACKAGE_BUGREPORT)
-strip_bracket(PACKAGE_BUGREPORT)
-list(GET CONFIGURE_AC_PACKAGE_INFO 3 PACKAGE_URL)
-strip_bracket(PACKAGE_URL)
-
-# Build more info.
-set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
-set(PACKAGE_TARNAME ${PACKAGE_NAME})
-set(VERSION ${PACKAGE_VERSION})
-
-## Generate the config.h header.
-configure_file(${CMAKE_CURRENT_LIST_DIR}/cmake/config.h.in
-  ${CMAKE_CURRENT_BINARY_DIR}/include/webp/config.h)
-add_definitions(-DHAVE_CONFIG_H)
-# The webp folder is included as we reference config.h as
-# ../webp/config.h or webp/config.h
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/include
-  ${CMAKE_CURRENT_BINARY_DIR}/include/webp
-)
-
 
 ################################################################################
 # WebP source files.
 # Read the Makefile.am to get the source files.
-set(WEBP_SRCS)
 
-function(parse_Makefile_am FOLDER WEBP_SRCS)
+# We expect the Makefiles to define the sources as defined in
+# the first regex. E.g.:
+# libimagedec_la_SOURCES  = image_dec.c image_dec.h
+function(parse_Makefile_am FOLDER VAR SRC_REGEX)
   file(READ ${FOLDER}/Makefile.am MAKEFILE_AM)
-  string(REGEX MATCHALL "_SOURCES \\+= [^\n]*"
+  string(REGEX MATCHALL "${SRC_REGEX}_SOURCES[ ]*\\+?=[ ]+[0-9a-z\\._ ]*"
     FILES_PER_LINE ${MAKEFILE_AM}
   )
-  set(SRCS ${WEBP_SRCS})
+  set(SRCS ${${VAR}})
   foreach(FILES ${FILES_PER_LINE})
-    string(SUBSTRING ${FILES} 12 -1 FILES)
-    string(REGEX MATCHALL "[0-9a-z\\._]+"
-      FILES ${FILES}
-    )
-    foreach(FILE ${FILES})
-      list(APPEND SRCS ${FOLDER}/${FILE})
-    endforeach()
+    string(FIND ${FILES} "=" OFFSET)
+    math(EXPR OFFSET "${OFFSET} + 2")
+    string(SUBSTRING ${FILES} ${OFFSET} -1 FILES)
+    if(FILES)
+      string(REGEX MATCHALL "[0-9a-z\\._]+"
+        FILES ${FILES}
+      )
+      foreach(FILE ${FILES})
+        list(APPEND SRCS ${FOLDER}/${FILE})
+      endforeach()
+    endif()
   endforeach()
-  set(WEBP_SRCS ${SRCS} PARENT_SCOPE)
+  set(${VAR} ${SRCS} PARENT_SCOPE)
 endfunction()
 
-parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/src/dec "${WEBP_SRCS}")
-parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/src/demux "${WEBP_SRCS}")
-parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/src/dsp "${WEBP_SRCS}")
-parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/src/enc "${WEBP_SRCS}")
-parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/src/utils "${WEBP_SRCS}")
+set(WEBP_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+parse_Makefile_am(${WEBP_SRC_DIR}/dec "WEBP_DEC_SRCS" "")
+parse_Makefile_am(${WEBP_SRC_DIR}/demux "WEBP_DEMUX_SRCS" "")
+parse_Makefile_am(${WEBP_SRC_DIR}/dsp "WEBP_DSP_COMMON_SRCS" "COMMON")
+parse_Makefile_am(${WEBP_SRC_DIR}/dsp "WEBP_DSP_ENC_SRCS" "ENC")
+parse_Makefile_am(${WEBP_SRC_DIR}/dsp "WEBP_DSP_ENC_SRCS" "dsp_[^ ]*")
+parse_Makefile_am(${WEBP_SRC_DIR}/dsp "WEBP_DSP_DEC_SRCS" "decode_[^ ]*")
+parse_Makefile_am(${WEBP_SRC_DIR}/enc "WEBP_ENC_SRCS" "")
+parse_Makefile_am(${WEBP_SRC_DIR}/utils "WEBP_UTILS_COMMON_SRCS" "COMMON")
+parse_Makefile_am(${WEBP_SRC_DIR}/utils "WEBP_UTILS_ENC_SRCS" "ENC")
+parse_Makefile_am(${WEBP_SRC_DIR}/utils "WEBP_UTILS_DEC_SRCS" "decode_[^ ]*")
 
-# Remove the files specific to SIMD we don't user.
+# Remove the files specific to SIMD we don't use.
 foreach(FILE ${WEBP_SIMD_FILES_NOT_TO_INCLUDE})
-  list(REMOVE_ITEM WEBP_SRCS ${FILE})
+  list(REMOVE_ITEM WEBP_DSP_ENC_SRCS ${FILE})
+  list(REMOVE_ITEM WEBP_DSP_DEC_SRCS ${FILE})
 endforeach()
 
-# Build the library.
-add_definitions(-Wall)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/ ${WEBP_DEP_INCLUDE_DIRS})
-add_library(webp ${WEBP_SRCS})
+### Define the mandatory libraries.
+# Build the webpdecoder library.
+if(MSVC)
+  # avoid security warnings for e.g., fopen() used in the examples.
+  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+else()
+  add_definitions(-Wall)
+endif()
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${WEBP_DEP_INCLUDE_DIRS})
+add_library(webpdecode OBJECT ${WEBP_DEC_SRCS})
+add_library(webpdspdecode OBJECT ${WEBP_DSP_COMMON_SRCS} ${WEBP_DSP_DEC_SRCS})
+add_library(webputilsdecode OBJECT ${WEBP_UTILS_COMMON_SRCS}
+  ${WEBP_UTILS_DEC_SRCS})
+add_library(webpdecoder $<TARGET_OBJECTS:webpdecode>
+  $<TARGET_OBJECTS:webpdspdecode> $<TARGET_OBJECTS:webputilsdecode>)
+target_link_libraries(webpdecoder ${WEBP_DEP_LIBRARIES})
+
+# Build the webp library.
+add_library(webpencode OBJECT ${WEBP_ENC_SRCS})
+add_library(webpdsp OBJECT ${WEBP_DSP_COMMON_SRCS} ${WEBP_DSP_DEC_SRCS}
+  ${WEBP_DSP_ENC_SRCS})
+add_library(webputils OBJECT ${WEBP_UTILS_COMMON_SRCS} ${WEBP_UTILS_DEC_SRCS}
+  ${WEBP_UTILS_ENC_SRCS})
+add_library(webp $<TARGET_OBJECTS:webpdecode> $<TARGET_OBJECTS:webpdsp>
+  $<TARGET_OBJECTS:webpencode> $<TARGET_OBJECTS:webputils>)
 target_link_libraries(webp ${WEBP_DEP_LIBRARIES})
 
+# Make sure the OBJECT libraries are built with position independent code
+# (it is not ON by default).
+set_target_properties(webpdecode webpdspdecode webputilsdecode
+  webpencode webpdsp webputils PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Build the webp demux library.
+add_library(webpdemux ${WEBP_DEMUX_SRCS})
+target_link_libraries(webpdemux webp)
+
+# Set the version numbers.
+function(parse_version FILE NAME VAR)
+  file(READ ${CMAKE_CURRENT_SOURCE_DIR}/src/${FILE} SOURCE_FILE)
+  string(REGEX MATCH "${NAME}_la_LDFLAGS[^\n]* -version-info [0-9:]+" TMP
+    ${SOURCE_FILE})
+  string(REGEX MATCH "[0-9:]+" TMP ${TMP})
+  string(REGEX REPLACE ":" "." VERSION ${TMP})
+  set(${VAR} "${VERSION}" PARENT_SCOPE)
+endfunction()
+parse_version(Makefile.am webp WEBP_WEBP_SOVERSION)
+set_target_properties(webp PROPERTIES VERSION ${PACKAGE_VERSION}
+  SOVERSION ${WEBP_WEBP_SOVERSION})
+parse_version(Makefile.am webpdecoder WEBP_DECODER_SOVERSION)
+set_target_properties(webpdecoder PROPERTIES VERSION ${PACKAGE_VERSION}
+  SOVERSION ${WEBP_DECODER_SOVERSION})
+parse_version(demux/Makefile.am webpdemux WEBP_DEMUX_SOVERSION)
+set_target_properties(webpdemux PROPERTIES VERSION ${PACKAGE_VERSION}
+  SOVERSION ${WEBP_DEMUX_SOVERSION})
+
+# Define the libraries to install.
+set(INSTALLED_LIBRARIES webpdecoder webp webpdemux)
+
+### Deal with SIMD.
 # Change the compile flags for SIMD files we use.
 list(LENGTH WEBP_SIMD_FILES_TO_INCLUDE WEBP_SIMD_FILES_TO_INCLUDE_LENGTH)
 math(EXPR WEBP_SIMD_FILES_TO_INCLUDE_RANGE
@@ -277,57 +174,198 @@ foreach(I_FILE RANGE ${WEBP_SIMD_FILES_TO_INCLUDE_RANGE})
 endforeach()
 
 # Build the executables if asked for.
-if(WEBP_BUILD_CWEBP OR WEBP_BUILD_DWEBP)
+if(WEBP_BUILD_CWEBP OR WEBP_BUILD_DWEBP OR
+   WEBP_BUILD_GIF2WEBP OR WEBP_BUILD_IMG2WEBP OR WEBP_BUILD_WEBP_JS)
   # Example utility library.
-  set(exampleutil_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/example_util.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/example_util.h
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "EXAMPLEUTIL_SRCS"
+    "example_util_[^ ]*")
+  list(APPEND EXAMPLEUTIL_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/examples/stopwatch.h)
-  add_library(exampleutil ${exampleutil_SRCS})
-  target_link_libraries(exampleutil webp ${WEBP_DEP_LIBRARIES})
-endif()
+  add_library(exampleutil ${EXAMPLEUTIL_SRCS})
 
-if(WEBP_BUILD_CWEBP)
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/imageio "IMAGEIOUTILS_SRCS"
+    "imageio_util_[^ ]*")
+  add_library(imageioutil ${IMAGEIOUTILS_SRCS})
+  target_link_libraries(imageioutil webp)
+
   # Image-decoding utility library.
-  set(exampledec_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/image_dec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/image_dec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/jpegdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/jpegdec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/metadata.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/metadata.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/pngdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/pngdec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/tiffdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/tiffdec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/webpdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/webpdec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/wicdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/wicdec.h)
-  add_library(exampledec ${exampledec_SRCS})
-  target_link_libraries(exampledec webp ${WEBP_DEP_LIBRARIES}
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/imageio "IMAGEDEC_SRCS"
+    "imagedec_[^ ]*")
+  add_library(imagedec ${IMAGEDEC_SRCS})
+  target_link_libraries(imagedec imageioutil webpdemux webp
     ${WEBP_DEP_IMG_LIBRARIES})
+
+  # Image-encoding utility library.
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/imageio "IMAGEENC_SRCS"
+    "imageenc_[^ ]*")
+  add_library(imageenc ${IMAGEENC_SRCS})
+  target_link_libraries(imageenc webp)
+
+  set_property(TARGET exampleutil imageioutil imagedec imageenc
+    PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
 endif()
 
 if(WEBP_BUILD_DWEBP)
   # dwebp
   include_directories(${WEBP_DEP_IMG_INCLUDE_DIRS})
-  add_executable(dwebp
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/dwebp.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/stopwatch.h
-  )
-  target_link_libraries(dwebp webp exampleutil ${WEBP_DEP_LIBRARIES}
-    ${WEBP_DEP_IMG_LIBRARIES}
-  )
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "DWEBP_SRCS"
+    "dwebp")
+  add_executable(dwebp ${DWEBP_SRCS})
+  target_link_libraries(dwebp exampleutil imagedec imageenc webpdecoder)
+  install(TARGETS dwebp RUNTIME DESTINATION bin)
+  set_property(TARGET dwebp PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
 endif()
 
 if(WEBP_BUILD_CWEBP)
   # cwebp
   include_directories(${WEBP_DEP_IMG_INCLUDE_DIRS})
-  add_executable(cwebp
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/cwebp.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples/stopwatch.h)
-  target_link_libraries(cwebp exampledec webp exampleutil
-    ${WEBP_DEP_LIBRARIES} ${WEBP_DEP_IMG_LIBRARIES}
-  )
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "CWEBP_SRCS"
+    "cwebp")
+  add_executable(cwebp ${CWEBP_SRCS})
+  target_link_libraries(cwebp exampleutil imagedec webp)
+  install(TARGETS cwebp RUNTIME DESTINATION bin)
+  set_property(TARGET cwebp PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
 endif()
+
+if(WEBP_BUILD_GIF2WEBP AND NOT GIF_FOUND)
+  unset(WEBP_BUILD_GIF2WEBP CACHE)
+endif()
+
+if(WEBP_BUILD_GIF2WEBP OR WEBP_BUILD_IMG2WEBP)
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/src/mux "WEBP_MUX_SRCS"
+    "")
+  add_library(webpmux ${WEBP_MUX_SRCS})
+  target_link_libraries(webpmux webp)
+  parse_version(mux/Makefile.am webpmux WEBP_MUX_SOVERSION)
+  set_target_properties(webpmux PROPERTIES VERSION ${PACKAGE_VERSION}
+    SOVERSION ${WEBP_MUX_SOVERSION})
+  list(APPEND INSTALLED_LIBRARIES webpmux)
+endif()
+
+if(WEBP_BUILD_GIF2WEBP)
+  # gif2webp
+  include_directories(${WEBP_DEP_GIF_INCLUDE_DIRS})
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "GIF2WEBP_SRCS"
+    "gif2webp")
+  add_executable(gif2webp ${GIF2WEBP_SRCS})
+  target_link_libraries(gif2webp exampleutil imageioutil webp webpmux
+    ${WEBP_DEP_GIF_LIBRARIES})
+  install(TARGETS gif2webp RUNTIME DESTINATION bin)
+  set_property(TARGET gif2webp PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
+endif()
+
+if(WEBP_BUILD_IMG2WEBP)
+  # img2webp
+  include_directories(${WEBP_DEP_IMG_INCLUDE_DIRS})
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "IMG2WEBP_SRCS"
+    "img2webp")
+  add_executable(img2webp ${IMG2WEBP_SRCS})
+  target_link_libraries(img2webp exampleutil imagedec imageioutil webp webpmux)
+  install(TARGETS img2webp RUNTIME DESTINATION bin)
+  set_property(TARGET img2webp PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
+endif()
+
+if (WEBP_BUILD_WEBPINFO)
+  # webpinfo
+  include_directories(${WEBP_DEP_IMG_INCLUDE_DIRS})
+  parse_Makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "WEBPINFO_SRCS"
+    "webpinfo")
+  add_executable(webpinfo ${WEBPINFO_SRCS})
+  target_link_libraries(webpinfo exampleutil imageioutil)
+  install(TARGETS webpinfo RUNTIME DESTINATION bin)
+  set_property(TARGET webpinfo PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
+endif()
+
+if(WEBP_BUILD_WEBP_JS)
+  # JavaScript version
+  add_executable(webp_js
+                 ${CMAKE_CURRENT_SOURCE_DIR}/extras/webp_to_sdl.c)
+  target_link_libraries(webp_js webpdecoder SDL)
+  set(WEBP_HAVE_SDL 1)
+  set_target_properties(webp_js PROPERTIES LINK_FLAGS
+      "-s EXPORTED_FUNCTIONS='[\"_WebpToSDL\"]' -s INVOKE_RUN=0 \
+       -s EXTRA_EXPORTED_RUNTIME_METHODS='[\"cwrap\"]'")
+  set_target_properties(webp_js PROPERTIES OUTPUT_NAME webp)
+  target_compile_definitions(webp_js PUBLIC EMSCRIPTEN WEBP_HAVE_SDL)
+
+  # WASM version
+  add_executable(webp_wasm
+                 ${CMAKE_CURRENT_SOURCE_DIR}/extras/webp_to_sdl.c)
+  target_link_libraries(webp_wasm webpdecoder SDL)
+  set_target_properties(webp_wasm PROPERTIES LINK_FLAGS
+      "-s WASM=1 -s 'BINARYEN_METHOD=\"native-wasm\"' \
+       -s EXPORTED_FUNCTIONS='[\"_WebpToSDL\"]' -s INVOKE_RUN=0 \
+       -s EXTRA_EXPORTED_RUNTIME_METHODS='[\"cwrap\"]'")
+  target_compile_definitions(webp_wasm PUBLIC EMSCRIPTEN WEBP_HAVE_SDL)
+
+  target_compile_definitions(webpdecoder PUBLIC EMSCRIPTEN)
+endif()
+
+# Generate the config.h file.
+configure_file(${CMAKE_CURRENT_LIST_DIR}/cmake/config.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/src/webp/config.h)
+add_definitions(-DHAVE_CONFIG_H)
+# The webp folder is included as we reference config.h as
+# ../webp/config.h or webp/config.h
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
+# Install the different headers and libraries.
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/decode.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/demux.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/encode.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/mux.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/mux_types.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h
+        DESTINATION include/webp)
+install(TARGETS ${INSTALLED_LIBRARIES}
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+
+# Create the CMake version file.
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/WebPConfigVersion.cmake"
+  VERSION ${PACKAGE_VERSION}
+  COMPATIBILITY AnyNewerVersion
+)
+
+# Create the Config file.
+include(CMakePackageConfigHelpers)
+set(ConfigPackageLocation share/WebP/cmake/)
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/WebPConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/WebPConfig.cmake
+  INSTALL_DESTINATION ${ConfigPackageLocation}
+)
+
+# Install the generated CMake files.
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/WebPConfigVersion.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/WebPConfig.cmake"
+  DESTINATION ${ConfigPackageLocation}
+)
+
+# Install the man pages.
+set(MAN_PAGES cwebp.1 dwebp.1 gif2webp.1 img2webp.1 vwebp.1 webpmux.1
+  webpinfo.1)
+set(EXEC_BUILDS "CWEBP" "DWEBP" "GIF2WEBP" "IMG2WEBP" "VWEBP" "WEBPMUX"
+  "WEBPINFO")
+list(LENGTH MAN_PAGES MAN_PAGES_LENGTH)
+math(EXPR MAN_PAGES_RANGE "${MAN_PAGES_LENGTH} - 1")
+
+foreach(I_MAN RANGE ${MAN_PAGES_RANGE})
+  list(GET EXEC_BUILDS ${I_MAN} EXEC_BUILD)
+  if(WEBP_BUILD_${EXEC_BUILD})
+    list(GET MAN_PAGES ${I_MAN} MAN_PAGE)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/man/${MAN_PAGE}
+      DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man/man1
+      COMPONENT doc
+    )
+  endif()
+endforeach()

@@ -5,7 +5,9 @@ import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.widget.ImageView;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -26,9 +28,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void initData() {
         InputStream rawImageStream = getResources().openRawResource(
-                R.raw.image);
+                R.raw.abf0000dafb4f0b0c6c);
 
         byte[] data = WebpUtils.streamToBytes(rawImageStream);
+        System.out.println(Arrays.toString(data));
         final Bitmap webpBitmap = WebpUtils.webpToBitmap(data);
 
         iv_logo.setImageBitmap(webpBitmap);

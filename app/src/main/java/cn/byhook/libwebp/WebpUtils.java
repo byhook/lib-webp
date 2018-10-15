@@ -41,6 +41,7 @@ public class WebpUtils {
 
     /**
      * 流转换为字节数组
+     *
      * @param in
      * @return
      */
@@ -72,9 +73,18 @@ public class WebpUtils {
                 && data[11] == 'P';
     }
 
+    public static int getWebpWidth(byte[] data) {
+        return ((int) data[27] & 0xff) << 8 | ((int) data[26] & 0xff);
+    }
+
+    public static int getWebpHeight(byte[] data) {
+        return ((int) data[29] & 0xff) << 8 | ((int) data[28] & 0xff);
+    }
+
     /**
      * 获取webp版本
      * 用来测试JNI的调用
+     *
      * @return
      */
     public static int getWebpVersion() {
