@@ -2,10 +2,10 @@ package cn.byhook.libwebp;
 
 import android.graphics.Bitmap;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
 import android.widget.ImageView;
 
-import java.io.IOException;
+import androidx.appcompat.app.AppCompatActivity;
+
 import java.io.InputStream;
 import java.util.Arrays;
 
