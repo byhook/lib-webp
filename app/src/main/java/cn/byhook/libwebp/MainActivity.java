@@ -28,7 +28,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void initData() {
         InputStream rawImageStream = getResources().openRawResource(
-                R.raw.abf0000dafb4f0b0c6c);
+                R.raw.background);
 
         byte[] data = WebpUtils.streamToBytes(rawImageStream);
         System.out.println(Arrays.toString(data));
